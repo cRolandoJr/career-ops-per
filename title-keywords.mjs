@@ -106,6 +106,17 @@ function compilePrefixedKeyword(kw) {
  * @param {string} kw - already trimmed and lowercased.
  * @returns {(lower: string) => boolean}
  */
+// Pliega diacríticos para que clave y título coincidan sin importar las tildes.
+// Motivo medido (2026-09-11): YPF publica "TECNICO CONTROL DE PRODUCCION" y el
+// portals.yml dice "Producción"; con solo toLowerCase() no matcheaban y el scan
+// descartó 37 avisos reales como filtered_title, sin ningún error visible.
+// Se pliegan LOS DOS LADOS, así que la comparación sigue siendo simétrica.
+// No se usa lib/ascii-fold.mjs: borra todo lo que no es [a-z0-9] (espacios,
+// ".NET", "L&D"), y acá esos caracteres son parte de la palabra clave.
+export function foldAccents(s) {
+  return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 export function compileKeyword(kw) {
   const prefixed = compilePrefixedKeyword(kw);
   if (prefixed) return prefixed;
@@ -208,7 +219,7 @@ export function buildTitleFilter(titleFilter) {
   // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
   const normalize = (arr, compile) => (Array.isArray(arr) ? arr : [])
     .filter(k => typeof k === 'string')
-    .map(k => k.trim().toLowerCase())
+    .map(k => foldAccents(k.trim().toLowerCase()))
     .filter(k => k.length > 0)
     .map(compile);
   // AND-groups are a POSITIVE-side feature only. On the negative side an entry
@@ -223,7 +234,7 @@ export function buildTitleFilter(titleFilter) {
     // non-string. Consolidating on scan.mjs's version would have carried that
     // throw onto a path that never had it, where it aborts jobs.filter and
     // drops a whole company's results for one malformed title.
-    const lower = String(title ?? '').toLowerCase();
+    const lower = foldAccents(String(title ?? '').toLowerCase());
     // An empty positive list is "no positive constraint", not "match nothing":
     // a negative-only title_filter is a legitimate config that rejects a few
     // roles and keeps the rest.

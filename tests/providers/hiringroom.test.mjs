@@ -94,6 +94,63 @@ try {
     pass('hiringroom.fetch() returns parsed jobs labelled with entry.name as company');
   else fail(`hiringroom.fetch() = ${JSON.stringify(fetched)}`);
 
+  // Newer tenants moved to a /portal/jobs microsite that embeds the listing as
+  // schema.org JSON-LD (ItemList of JobPosting) and has none of the legacy card
+  // markup. The fixture mirrors that shape: an http:// url (normalized to the
+  // https origin), a string address, an object address, an entity-encoded HTML
+  // description, a foreign-host url (dropped) and a non-vacancy url (dropped).
+  const ld = {
+    '@context': 'https://schema.org', '@type': 'ItemList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, item: {
+        '@type': 'JobPosting', title: ' Ingeniero/a de Producci&oacute;n ',
+        jobLocation: { '@type': 'Place', address: 'La Plata, Buenos Aires, Argentina' },
+        description: '<p>Gestionar la ingenier&iacute;a de <strong>producci&oacute;n</strong>.</p>\n<p>Turnos rotativos.</p>',
+        datePosted: '2026-09-08',
+        url: 'http://acme.hiringroom.com/jobs/get_vacancy/6aa02812d6589654b9d9ff67' } },
+      { '@type': 'ListItem', position: 2, item: {
+        '@type': 'JobPosting', title: 'Operario/a de Mantenimiento',
+        jobLocation: { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: 'Puerto Madryn', addressRegion: 'Chubut', addressCountry: 'Argentina' } },
+        datePosted: 'not-a-date',
+        url: 'https://acme.hiringroom.com/jobs/get_vacancy/68a629f6a7b3ca2fd423e61b' } },
+      { '@type': 'ListItem', position: 3, item: {
+        '@type': 'JobPosting', title: 'Elsewhere',
+        url: 'https://evil.example.com/jobs/get_vacancy/aaa111' } },
+      { '@type': 'ListItem', position: 4, item: {
+        '@type': 'JobPosting', title: 'Not a vacancy',
+        url: 'https://acme.hiringroom.com/portal' } },
+    ],
+  };
+  const portalHtml = `<html><head>
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Acme"}</script>
+    <script type="application/ld+json">${JSON.stringify(ld)}</script>
+    </head><body><a href="https://acme.hiringroom.com/jobs/get_vacancy/6aa02812d6589654b9d9ff67">Ver</a></body></html>`;
+
+  const pj = parseHiringRoomJobs(portalHtml, 'https://acme.hiringroom.com', 'Acme');
+
+  if (pj.length === 2)
+    pass('parseHiringRoomJobs reads the /portal JSON-LD listing (drops foreign-host and non-vacancy urls)');
+  else fail(`parseHiringRoomJobs /portal returned ${pj.length} jobs (expected 2): ${JSON.stringify(pj.map(j => j.url))}`);
+
+  if (pj[0]?.url === 'https://acme.hiringroom.com/jobs/get_vacancy/6aa02812d6589654b9d9ff67'
+      && pj[0]?.title === 'Ingeniero/a de Producción'
+      && pj[0]?.company === 'Acme'
+      && pj[0]?.location === 'La Plata, Buenos Aires, Argentina')
+    pass('parseHiringRoomJobs maps JSON-LD title/url/location, forcing the https origin');
+  else fail(`parseHiringRoomJobs /portal row 0 = ${JSON.stringify(pj[0])}`);
+
+  if (pj[0]?.postedAt === Date.parse('2026-09-08'))
+    pass('parseHiringRoomJobs maps datePosted to postedAt (epoch ms)');
+  else fail(`parseHiringRoomJobs /portal row 0 postedAt = ${JSON.stringify(pj[0]?.postedAt)}`);
+
+  if (pj[0]?.description === 'Gestionar la ingeniería de producción. Turnos rotativos.')
+    pass('parseHiringRoomJobs flattens the JSON-LD description to plain text');
+  else fail(`parseHiringRoomJobs /portal row 0 description = ${JSON.stringify(pj[0]?.description)}`);
+
+  if (pj[1]?.location === 'Puerto Madryn, Chubut, Argentina' && !('postedAt' in (pj[1] || {})))
+    pass('parseHiringRoomJobs joins a PostalAddress and omits an unparseable datePosted');
+  else fail(`parseHiringRoomJobs /portal row 1 = ${JSON.stringify(pj[1])}`);
+
   // SSRF: a non-hiringroom host must throw before any parse.
   let ssrfThrew = false;
   try {
